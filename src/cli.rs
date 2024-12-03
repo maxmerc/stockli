@@ -14,24 +14,21 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use std::io;
-use std::time::{Duration, Instant};
 
 struct App {
     selected_option: usize,
     options: Vec<&'static str>,
     input: Input,
     watchlist: Watchlist,
-    startup_time: Instant,
 }
 
 impl App {
     fn new() -> Self {
         Self {
             selected_option: 0,
-            options: vec!["Add Stock", "Remove Stock", "View Watchlist", "Exit"],
+            options: vec!["Add Stock", "Remove Stock", "View Watchlist", "Refresh Data", "Exit"],
             input: Input::default(),
             watchlist: Watchlist::new(),
-            startup_time: Instant::now(),
         }
     }
 
@@ -45,21 +42,6 @@ impl App {
         if self.selected_option > 0 {
             self.selected_option -= 1;
         }
-    }
-
-    /// Dynamically update the header title for chunks[1]
-    fn get_header_title(&self) -> &str {
-        match self.selected_option {
-            0 => "Add Stock",
-            1 => "Remove Stock",
-            2 => "Watchlist",
-            _ => "Exit",
-        }
-    }
-
-    /// Check if the program is ready to accept inputs
-    fn is_ready(&self) -> bool {
-        self.startup_time.elapsed() > Duration::from_secs(1)
     }
 }
 
@@ -81,20 +63,11 @@ pub async fn run() -> Result<(), io::Error> {
         };
 
         terminal.draw(|f| {
-            let layout_constraints = if app.selected_option == 2 {
-                vec![
-                    Constraint::Percentage(20), // Menu
-                    Constraint::Percentage(40), // Watchlist Table
-                    Constraint::Percentage(20), // Refresh Message
-                    Constraint::Percentage(20), // Last Action
-                ]
-            } else {
-                vec![
-                    Constraint::Percentage(20), // Menu
-                    Constraint::Percentage(60), // Main Content
-                    Constraint::Percentage(20), // Last Action
-                ]
-            };
+            let layout_constraints = vec![
+                Constraint::Percentage(20), // Menu
+                Constraint::Percentage(60), // Main Content or Watchlist Table
+                Constraint::Percentage(20), // Last Action
+            ];
 
             let chunks = Layout::default()
                 .direction(Direction::Vertical)
@@ -102,6 +75,7 @@ pub async fn run() -> Result<(), io::Error> {
                 .constraints(layout_constraints)
                 .split(f.area());
 
+            // Render menu
             let menu_items: Vec<ListItem> = app
                 .options
                 .iter()
@@ -119,81 +93,82 @@ pub async fn run() -> Result<(), io::Error> {
                 .block(Block::default().borders(Borders::ALL).title("Options"));
             f.render_widget(menu, chunks[0]);
 
+            // Render main content
             if app.selected_option == 2 {
-                let rows = watchlist_rows.into_iter().map(|(symbol, price, change)| {
-                    ratatui::widgets::Row::new(vec![
-                        Span::raw(symbol),
-                        Span::raw(price),
-                        Span::raw(change),
-                    ])
+                // View Watchlist: Render Watchlist Table
+                let rows = watchlist_rows.into_iter().map(|(symbol, open, close, change)| {
+                    ratatui::widgets::Row::new(vec![Span::raw(symbol), Span::raw(open), Span::raw(close), Span::raw(change)])
                 });
-                let widths = &[Constraint::Length(10), Constraint::Length(10), Constraint::Length(10)];
+                let widths = [Constraint::Percentage(25), Constraint::Percentage(25), Constraint::Percentage(25), Constraint::Percentage(25)];
                 let table = Table::new(rows, widths)
                     .header(
-                        ratatui::widgets::Row::new(vec!["Symbol", "Price", "Change (%)"])
+                        ratatui::widgets::Row::new(vec!["Symbol", "Open", "Close", "Change (%)"])
                             .style(Style::default().fg(Color::Yellow)),
                     )
                     .block(Block::default().borders(Borders::ALL).title("Watchlist"));
                 f.render_widget(table, chunks[1]);
-
-                let refresh_message = Paragraph::new("Press Enter to refresh stock data.")
-                    .block(Block::default().borders(Borders::ALL).title("Refresh Stock Data"));
-                f.render_widget(refresh_message, chunks[2]);
+            } else if app.selected_option == 0 || app.selected_option == 1 {
+                // Add/Remove Stock: Render Input Box
+                let title = if app.selected_option == 0 { "Add Stock" } else { "Remove Stock" };
+                let content = Paragraph::new(app.input.value())
+                    .block(Block::default().borders(Borders::ALL).title(title));
+                f.render_widget(content, chunks[1]);
+            } else if app.selected_option == 3 {
+                // Refresh Data: Render Refresh Message
+                let content = Paragraph::new("Press Enter to refresh stock data.")
+                    .block(Block::default().borders(Borders::ALL).title("Refresh Data"));
+                f.render_widget(content, chunks[1]);
             } else {
-                let header_title = app.get_header_title();
-                let content_message = match app.selected_option {
-                    0 | 1 => app.input.value().to_string(),
-                    3 => "Press Enter to close the program.".to_string(),
-                    _ => "".to_string(),
-                };
-
-                let content = Paragraph::new(content_message)
-                    .block(Block::default().borders(Borders::ALL).title(header_title));
+                // Exit: Render Exit Message
+                let content = Paragraph::new("Press Enter to exit the program.")
+                    .block(Block::default().borders(Borders::ALL).title("Exit"));
                 f.render_widget(content, chunks[1]);
             }
 
+            // Render Last Action box
             let last_action_box = Paragraph::new(last_action_message.as_str())
                 .block(Block::default().borders(Borders::ALL).title("Last Action"));
-            let last_action_chunk_index = if app.selected_option == 2 { 3 } else { 2 };
-            f.render_widget(last_action_box, chunks[last_action_chunk_index]);
+            f.render_widget(last_action_box, chunks[2]);
         })?;
 
-        if app.is_ready() {
-            if let CEvent::Key(key) = event::read()? {
-                match key {
-                    KeyEvent { code: KeyCode::Up, kind: event::KeyEventKind::Press, .. } => app.previous_option(),
-                    KeyEvent { code: KeyCode::Down, kind: event::KeyEventKind::Press, .. } => app.next_option(),
-                    KeyEvent { code: KeyCode::Enter, kind: event::KeyEventKind::Press, .. } => match app.selected_option {
-                        0 => {
-                            let trimmed_symbol = app.input.value().trim().to_string();
-                            if trimmed_symbol.is_empty() {
-                                last_action_message = "Cannot add an empty stock symbol.".to_string();
-                            } else if let Ok(message) = app.watchlist.add_stock(trimmed_symbol).await {
-                                last_action_message = message;
-                            } else {
-                                last_action_message = format!("Failed to add stock.");
-                            }
-                            app.input.reset();
+        // Handle input events
+        if let CEvent::Key(key) = event::read()? {
+            match key {
+                KeyEvent { code: KeyCode::Up, kind: event::KeyEventKind::Press, .. } => app.previous_option(),
+                KeyEvent { code: KeyCode::Down, kind: event::KeyEventKind::Press, .. } => app.next_option(),
+                KeyEvent { code: KeyCode::Enter, kind: event::KeyEventKind::Press, .. } => match app.selected_option {
+                    0 => {
+                        // Add Stock
+                        let trimmed_symbol = app.input.value().trim().to_string();
+                        if trimmed_symbol.is_empty() {
+                            last_action_message = "Cannot add an empty stock symbol.".to_string();
+                        } else if let Ok(message) = app.watchlist.add_stock(trimmed_symbol).await {
+                            last_action_message = message;
+                        } else {
+                            last_action_message = "Failed to add stock.".to_string();
                         }
-                        1 => {
-                            if let Ok(message) = app.watchlist.remove_stock(app.input.value().trim()) {
-                                last_action_message = message;
-                            } else {
-                                last_action_message = "Failed to remove stock.".to_string();
-                            }
-                            app.input.reset();
-                        }
-                        2 => {
-                            let messages = app.watchlist.refresh_data().await;
-                            last_action_message = messages.join("\n");
-                        }
-                        3 => break,
-                        _ => {}
-                    },
-                    KeyEvent { code: KeyCode::Esc, .. } => break,
-                    _ => {
-                        app.input.handle_event(&CEvent::Key(key));
+                        app.input.reset();
                     }
+                    1 => {
+                        // Remove Stock
+                        let trimmed_symbol = app.input.value().trim();
+                        if let Ok(message) = app.watchlist.remove_stock(trimmed_symbol) {
+                            last_action_message = message;
+                        } else {
+                            last_action_message = "Failed to remove stock.".to_string();
+                        }
+                        app.input.reset();
+                    }
+                    3 => {
+                        // Refresh Data
+                        let messages = app.watchlist.refresh_data().await;
+                        last_action_message = messages.join("\n");
+                    }
+                    4 => break, // Exit
+                    _ => {}
+                },
+                _ => {
+                    app.input.handle_event(&CEvent::Key(key));
                 }
             }
         }
@@ -203,3 +178,4 @@ pub async fn run() -> Result<(), io::Error> {
     execute!(io::stdout(), LeaveAlternateScreen)?;
     Ok(())
 }
+

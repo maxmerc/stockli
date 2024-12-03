@@ -4,7 +4,7 @@ use crate::api::fetch_stock_data;
 #[derive(Default)]
 pub struct Watchlist {
     stocks: HashSet<String>,                     // Set of stock symbols
-    cached_data: HashMap<String, (f64, f64)>,    // Symbol -> (Price, Change Percentage)
+    cached_data: HashMap<String, (f64, f64, f64)>, // Symbol -> (Open, Close, Change Percentage)
 }
 
 impl Watchlist {
@@ -20,12 +20,13 @@ impl Watchlist {
         if self.stocks.contains(&symbol) {
             return Err(format!("{} is already in your watchlist.", symbol));
         }
+    
         match fetch_stock_data(&symbol).await {
             Ok(stock_data) => {
                 self.stocks.insert(symbol.clone());
                 self.cached_data.insert(
                     stock_data.symbol.clone(),
-                    (stock_data.price, stock_data.percentage_change),
+                    (stock_data.open, stock_data.close, stock_data.percentage_change),
                 );
                 Ok(format!("Added {} to watchlist.", stock_data.symbol))
             }
@@ -52,7 +53,7 @@ impl Watchlist {
                 Ok(stock_data) => {
                     self.cached_data.insert(
                         stock_data.symbol.clone(),
-                        (stock_data.price, stock_data.percentage_change),
+                        (stock_data.open, stock_data.close, stock_data.percentage_change),
                     );
                     messages.push(format!("Updated data for {}.", symbol));
                 }
@@ -65,16 +66,15 @@ impl Watchlist {
         messages
     }
 
-    pub fn get_cached_data(&self) -> Vec<(String, String, String)> {
+    pub fn get_cached_data(&self) -> Vec<(String, String, String, String)> {
         self.cached_data
             .iter()
-            .filter(|(symbol, &(price, _))| !symbol.is_empty() && price > 0.0)
-            .map(|(symbol, &(price, change))| (
+            .map(|(symbol, &(open, close, change))| (
                 symbol.clone(),
-                format!("${:.2}", price),
+                format!("${:.2}", open),
+                format!("${:.2}", close),
                 format!("{:.2}%", change),
             ))
             .collect()
     }
-    
 }
