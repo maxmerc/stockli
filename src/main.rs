@@ -1,12 +1,8 @@
-mod cli;
-mod api;
-mod watchlist;
-mod utils;
-
 use dotenv::dotenv;
+use stockli::cli;
 
 #[tokio::main]
 async fn main() {
     dotenv().ok(); // Load environment variables from a `.env` file if available.
-    cli::run().await;
+    let _ = cli::run().await;
 }
