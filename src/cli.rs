@@ -74,15 +74,12 @@ pub async fn run() -> Result<(), io::Error> {
     let mut last_action_message = String::new();
 
     loop {
-        // Prepare watchlist data if viewing it
         let watchlist_rows = if app.selected_option == 2 {
-            println!("DEBUG: Watchlist: {:?}", app.watchlist.get_cached_data()); // Debug print
             app.watchlist.get_cached_data()
         } else {
             vec![]
         };
 
-        // Render UI
         terminal.draw(|f| {
             let layout_constraints = if app.selected_option == 2 {
                 vec![
@@ -105,7 +102,6 @@ pub async fn run() -> Result<(), io::Error> {
                 .constraints(layout_constraints)
                 .split(f.area());
 
-            // Render menu
             let menu_items: Vec<ListItem> = app
                 .options
                 .iter()
@@ -124,7 +120,6 @@ pub async fn run() -> Result<(), io::Error> {
             f.render_widget(menu, chunks[0]);
 
             if app.selected_option == 2 {
-                // Render Watchlist Table
                 let rows = watchlist_rows.into_iter().map(|(symbol, price, change)| {
                     ratatui::widgets::Row::new(vec![
                         Span::raw(symbol),
@@ -141,16 +136,13 @@ pub async fn run() -> Result<(), io::Error> {
                     .block(Block::default().borders(Borders::ALL).title("Watchlist"));
                 f.render_widget(table, chunks[1]);
 
-                // Render Refresh Message
                 let refresh_message = Paragraph::new("Press Enter to refresh stock data.")
                     .block(Block::default().borders(Borders::ALL).title("Refresh Stock Data"));
                 f.render_widget(refresh_message, chunks[2]);
             } else {
-                // Render content for other options
                 let header_title = app.get_header_title();
                 let content_message = match app.selected_option {
-                    0 => app.input.value().to_string(),
-                    1 => app.input.value().to_string(),
+                    0 | 1 => app.input.value().to_string(),
                     3 => "Press Enter to close the program.".to_string(),
                     _ => "".to_string(),
                 };
@@ -160,14 +152,12 @@ pub async fn run() -> Result<(), io::Error> {
                 f.render_widget(content, chunks[1]);
             }
 
-            // Render Last Action box
             let last_action_box = Paragraph::new(last_action_message.as_str())
                 .block(Block::default().borders(Borders::ALL).title("Last Action"));
             let last_action_chunk_index = if app.selected_option == 2 { 3 } else { 2 };
             f.render_widget(last_action_box, chunks[last_action_chunk_index]);
         })?;
 
-        // Handle input events
         if app.is_ready() {
             if let CEvent::Key(key) = event::read()? {
                 match key {
@@ -175,25 +165,21 @@ pub async fn run() -> Result<(), io::Error> {
                     KeyEvent { code: KeyCode::Down, kind: event::KeyEventKind::Press, .. } => app.next_option(),
                     KeyEvent { code: KeyCode::Enter, kind: event::KeyEventKind::Press, .. } => match app.selected_option {
                         0 => {
-                            let raw_input = app.input.value().to_string();
-                            let trimmed_symbol = raw_input.trim();
-                            println!("DEBUG: Raw Input: '{}', Trimmed Symbol: '{}'", raw_input, trimmed_symbol); // Debug print
-                            
+                            let trimmed_symbol = app.input.value().trim().to_string();
                             if trimmed_symbol.is_empty() {
                                 last_action_message = "Cannot add an empty stock symbol.".to_string();
-                            } else if let Ok(message) = app.watchlist.add_stock(trimmed_symbol.to_string()).await {
+                            } else if let Ok(message) = app.watchlist.add_stock(trimmed_symbol).await {
                                 last_action_message = message;
                             } else {
-                                last_action_message = format!("Failed to add stock {}.", trimmed_symbol);
+                                last_action_message = format!("Failed to add stock.");
                             }
                             app.input.reset();
                         }
-
                         1 => {
                             if let Ok(message) = app.watchlist.remove_stock(app.input.value().trim()) {
                                 last_action_message = message;
                             } else {
-                                last_action_message = format!("Failed to remove stock {}.", app.input.value());
+                                last_action_message = "Failed to remove stock.".to_string();
                             }
                             app.input.reset();
                         }
